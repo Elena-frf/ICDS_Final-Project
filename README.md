@@ -51,6 +51,21 @@ q: to leave the chat system
 The GUI also provides buttons for common actions: `Time`, `Who`, `Poem`,
 `Search`, `Snake`, `Scores`, `Tic-Tac-Toe`, and `Leave Chat`.
 
+## Emoji Shortcuts
+
+The chat input supports emoji keywords that are automatically converted to emoji characters. Example shortcuts include:
+
+- `e_happy` → 😀
+- `e_sad` → 😢
+- `e_love` → 😍
+- `e_cool` → 😎
+- `e_cry` → 😢
+- `e_angry` → 😡
+- `e_thumbup` → 👍
+- `e_thumbdown` → 👎
+- `e_heart` → ❤️
+- `e_fire` → 🔥
+
 ## Group Chat
 
 Users can form a group through the connect command. For example:
