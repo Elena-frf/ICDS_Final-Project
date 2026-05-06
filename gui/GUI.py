@@ -14,6 +14,8 @@ from tkinter import font
 from tkinter import ttk
 from tkinter import simpledialog
 from chat_utils import *
+from snake_game import launch_snake
+from tictactoe_game import TicTacToeGame
 import json
 
 # GUI class for the chat
@@ -30,6 +32,8 @@ class GUI:
         self.my_msg = ""
         self.system_msg = ""
         self.process = None
+        self.tictactoe_game = None
+        self.sm.set_tictactoe_handler(self.handleTicTacToeEvent)
         self.emoji_dict = {
             "e_happy": "😀",
             "e_sad": "😢",
@@ -160,8 +164,9 @@ class GUI:
         self.Window.protocol("WM_DELETE_WINDOW", self.on_close)
         self.Window.resizable(width = False,
                               height = False)
-        self.Window.configure(width = 470,
-                              height = 700,
+        self.Window.geometry("560x740")
+        self.Window.configure(width = 560,
+                              height = 740,
                               bg = "#17202A")
         self.labelHead = Label(self.Window,
                              bg = "#17202A", 
@@ -179,43 +184,55 @@ class GUI:
                         rely = 0.07,
                         relheight = 0.012)
           
-        self.buttonFrame = Frame(self.Window, bg="#17202A")
-        self.buttonFrame.place(relwidth=1, rely=0.832, relheight=0.04)
-        
-        self.btnTime = Button(self.buttonFrame, text="Time", command=self.sendTime, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
-        self.btnTime.pack(side=LEFT, padx=5, pady=2)
-        
-        self.btnWho = Button(self.buttonFrame, text="Who", command=self.sendWho, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
-        self.btnWho.pack(side=LEFT, padx=5, pady=2)
-        
-        self.btnPoem = Button(self.buttonFrame, text="Poem", command=self.sendPoem, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
-        self.btnPoem.pack(side=LEFT, padx=5, pady=2)
-        
-        self.btnSearch = Button(self.buttonFrame, text="Search", command=self.sendSearch, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
-        self.btnSearch.pack(side=LEFT, padx=5, pady=2)
-        
-        self.btnLeave = Button(self.buttonFrame, text="Leave Chat", command=lambda : self.sendButton("bye"), bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
-        self.btnLeave.pack(side=LEFT, padx=5, pady=2)
-          
         self.textCons = Text(self.Window,
-                             width = 20, 
+                             width = 20,
                              height = 2,
                              bg = "#17202A",
                              fg = "#EAECEE",
-                             font = "Helvetica 14", 
+                             font = "Helvetica 14",
                              padx = 5,
                              pady = 5)
-          
-        self.textCons.place(relheight = 0.7,
-                            relwidth = 1, 
-                            rely = 0.132)
+
+        self.textCons.place(relheight = 0.64,
+                            relwidth = 1,
+                            rely = 0.125)
+
+        self.buttonFrame = Frame(self.Window, bg="#17202A")
+        self.buttonFrame.place(relwidth=1, rely=0.775, relheight=0.095)
+        
+        self.btnTime = Button(self.buttonFrame, text="Time", command=self.sendTime, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
+        self.btnTime.grid(row=0, column=0, padx=5, pady=4, sticky="ew")
+        
+        self.btnWho = Button(self.buttonFrame, text="Who", command=self.sendWho, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
+        self.btnWho.grid(row=0, column=1, padx=5, pady=4, sticky="ew")
+        
+        self.btnPoem = Button(self.buttonFrame, text="Poem", command=self.sendPoem, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
+        self.btnPoem.grid(row=0, column=2, padx=5, pady=4, sticky="ew")
+        
+        self.btnSearch = Button(self.buttonFrame, text="Search", command=self.sendSearch, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
+        self.btnSearch.grid(row=0, column=3, padx=5, pady=4, sticky="ew")
+
+        self.btnSnake = Button(self.buttonFrame, text="Snake", command=self.openSnake, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
+        self.btnSnake.grid(row=1, column=0, padx=5, pady=4, sticky="ew")
+
+        self.btnLeaderboard = Button(self.buttonFrame, text="Scores", command=self.sendLeaderboard, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
+        self.btnLeaderboard.grid(row=1, column=1, padx=5, pady=4, sticky="ew")
+
+        self.btnTicTacToe = Button(self.buttonFrame, text="Tic-Tac-Toe", command=self.openTicTacToe, bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
+        self.btnTicTacToe.grid(row=1, column=2, padx=5, pady=4, sticky="ew")
+        
+        self.btnLeave = Button(self.buttonFrame, text="Leave Chat", command=lambda : self.sendButton("bye"), bg="#ABB2B9", fg="#17202A", font="Helvetica 10 bold")
+        self.btnLeave.grid(row=1, column=3, padx=5, pady=4, sticky="ew")
+
+        for col in range(4):
+            self.buttonFrame.grid_columnconfigure(col, weight=1, uniform="toolbar")
           
         self.labelBottom = Label(self.Window,
                                  bg = "#ABB2B9",
                                  height = 120)
           
         self.labelBottom.place(relwidth = 1,
-                               rely = 0.872)
+                               rely = 0.882)
           
         self.entryMsg = Entry(self.labelBottom,
                               bg = "#2C3E50",
@@ -292,6 +309,29 @@ class GUI:
         term = simpledialog.askstring("Search", "Enter search term:")
         if term:
             self.sendButton("? " + term)
+
+    def openSnake(self):
+        launch_snake(self.Window, on_game_over=self.reportSnakeScore)
+
+    def sendLeaderboard(self):
+        self.sendButton("leaderboard")
+
+    def reportSnakeScore(self, score):
+        self.sendButton("__snake_score__ " + str(score))
+
+    def openTicTacToe(self):
+        if self.tictactoe_game is not None and not self.tictactoe_game.closed:
+            self.tictactoe_game.window.lift()
+            return
+        self.tictactoe_game = TicTacToeGame(self.Window, self.sendButton, self.name)
+
+    def handleTicTacToeEvent(self, event):
+        self.Window.after(0, lambda: self.applyTicTacToeEvent(event))
+
+    def applyTicTacToeEvent(self, event):
+        if self.tictactoe_game is None or self.tictactoe_game.closed:
+            return
+        self.tictactoe_game.apply_event(event)
 
     def process_emojis(self, msg):
         for key, emoji in self.emoji_dict.items():

@@ -13,6 +13,10 @@ class ClientSM:
         self.me = ''
         self.out_msg = ''
         self.s = s
+        self.tictactoe_handler = None
+
+    def set_tictactoe_handler(self, handler):
+        self.tictactoe_handler = handler
 
     def set_state(self, state):
         self.state = state
@@ -48,6 +52,88 @@ class ClientSM:
         self.out_msg += 'You are disconnected from ' + self.peer + '\n'
         self.peer = ''
 
+    def submit_snake_score(self, score):
+        try:
+            score = int(score)
+        except Exception:
+            score = 0
+        mysend(self.s, json.dumps({"action":"snake_score", "score":score}))
+        response = json.loads(myrecv(self.s))
+        if response.get("new_best"):
+            self.out_msg += "Snake game over. New best score: " + str(score) + "\n"
+        else:
+            self.out_msg += "Snake game over. Score: " + str(score) + "\n"
+        self.out_msg += response.get("results", "") + "\n"
+
+    def show_leaderboard(self):
+        mysend(self.s, json.dumps({"action":"leaderboard"}))
+        response = json.loads(myrecv(self.s))
+        self.out_msg += response.get("results", "") + "\n"
+
+    def generate_ai_picture(self, prompt):
+        prompt = prompt.strip()
+        if not prompt:
+            self.out_msg += "Please enter a prompt after /aipic:\n"
+            return
+        mysend(self.s, json.dumps({"action":"aipic", "prompt":prompt}))
+        response = json.loads(myrecv(self.s))
+        if response.get("status") == "ok":
+            self.out_msg += response.get("results", "") + "\n"
+        else:
+            self.out_msg += "AI image generation failed: " + response.get("results", "unknown error") + "\n"
+
+    def emit_tictactoe_event(self, event):
+        if self.tictactoe_handler is not None:
+            self.tictactoe_handler(event)
+
+    def join_tictactoe(self):
+        mysend(self.s, json.dumps({"action":"ttt_join"}))
+        self.emit_tictactoe_event(json.loads(myrecv(self.s)))
+
+    def tictactoe_move(self, cell):
+        try:
+            cell = int(cell)
+        except Exception:
+            cell = -1
+        mysend(self.s, json.dumps({"action":"ttt_move", "cell":cell}))
+        self.emit_tictactoe_event(json.loads(myrecv(self.s)))
+
+    def reset_tictactoe(self):
+        mysend(self.s, json.dumps({"action":"ttt_reset"}))
+        self.emit_tictactoe_event(json.loads(myrecv(self.s)))
+
+    def leave_tictactoe(self):
+        mysend(self.s, json.dumps({"action":"ttt_leave"}))
+        self.emit_tictactoe_event(json.loads(myrecv(self.s)))
+
+    def handle_tictactoe_command(self, my_msg):
+        if my_msg == "__ttt_join__":
+            self.join_tictactoe()
+            return True
+        if my_msg.startswith("__ttt_move__ "):
+            self.tictactoe_move(my_msg[len("__ttt_move__ "):].strip())
+            return True
+        if my_msg == "__ttt_reset__":
+            self.reset_tictactoe()
+            return True
+        if my_msg == "__ttt_leave__":
+            self.leave_tictactoe()
+            return True
+        return False
+
+    def handle_tictactoe_event(self, peer_msg):
+        if peer_msg.get("action", "").startswith("ttt_"):
+            self.emit_tictactoe_event(peer_msg)
+            return True
+        return False
+
+    def handle_server_notice(self, peer_msg):
+        if peer_msg.get("action") == "leaderboard_update":
+            self.out_msg += "Snake leaderboard updated:\n"
+            self.out_msg += peer_msg.get("results", "") + "\n"
+            return True
+        return False
+
     def proc(self, my_msg, peer_msg):
         self.out_msg = ''
 #==============================================================================
@@ -73,6 +159,21 @@ class ClientSM:
                     logged_in = json.loads(myrecv(self.s))["results"]
                     self.out_msg += 'Here are all the users in the system:\n'
                     self.out_msg += logged_in
+
+                elif my_msg == 'leaderboard':
+                    self.show_leaderboard()
+
+                elif my_msg.startswith('__snake_score__ '):
+                    self.submit_snake_score(my_msg[len('__snake_score__ '):].strip())
+
+                elif my_msg.startswith('/aipic:'):
+                    self.generate_ai_picture(my_msg[len('/aipic:'):])
+
+                elif self.handle_tictactoe_command(my_msg):
+                    pass
+
+                elif my_msg == 'ttt':
+                    self.out_msg += "Use the TicTacToe button to open Tic-Tac-Toe Online.\n"
 
                 elif my_msg[0] == 'c':
                     peer = my_msg[1:]
@@ -108,7 +209,11 @@ class ClientSM:
 
             if len(peer_msg) > 0:
                 peer_msg = json.loads(peer_msg)
-                if peer_msg["action"] == "connect":
+                if self.handle_tictactoe_event(peer_msg):
+                    pass
+                elif self.handle_server_notice(peer_msg):
+                    pass
+                elif peer_msg["action"] == "connect":
                     self.peer = peer_msg["from"]
                     self.out_msg += 'Request from ' + self.peer + '\n'
                     self.out_msg += 'You are connected with ' + self.peer
@@ -122,6 +227,21 @@ class ClientSM:
 #==============================================================================
         elif self.state == S_CHATTING:
             if len(my_msg) > 0:     # my stuff going out
+                if my_msg == 'leaderboard':
+                    self.show_leaderboard()
+                    return self.out_msg
+
+                if my_msg.startswith('__snake_score__ '):
+                    self.submit_snake_score(my_msg[len('__snake_score__ '):].strip())
+                    return self.out_msg
+
+                if my_msg.startswith('/aipic:'):
+                    self.generate_ai_picture(my_msg[len('/aipic:'):])
+                    return self.out_msg
+
+                if self.handle_tictactoe_command(my_msg):
+                    return self.out_msg
+
                 # allow 'q' to leave chat as well (consistent with logged-in mode)
                 if my_msg == 'q':
                     my_msg = 'bye'
@@ -135,7 +255,11 @@ class ClientSM:
                     self.peer = ''
             if len(peer_msg) > 0:    # peer's stuff, coming in
                 peer_msg = json.loads(peer_msg)
-                if peer_msg["action"] == "connect":
+                if self.handle_tictactoe_event(peer_msg):
+                    pass
+                elif self.handle_server_notice(peer_msg):
+                    pass
+                elif peer_msg["action"] == "connect":
                     self.out_msg += "(" + peer_msg["from"] + " joined)\n"
                 elif peer_msg["action"] == "disconnect":
                     self.state = S_LOGGEDIN

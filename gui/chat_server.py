@@ -15,6 +15,7 @@ import json
 import pickle as pkl
 from chat_utils import *
 import chat_group as grp
+from ai_pic import generate_ai_image
 
 class Server:
     def __init__(self):
@@ -23,14 +24,18 @@ class Server:
         self.logged_sock2name = {} # dict mapping socket to user name
         self.all_sockets = []
         self.group = grp.Group()
+        self.ttt_game = self._new_ttt_game()
 
         # storage locations (keep generated files out of the project root)
         self.base_dir = os.path.dirname(__file__)
         self.data_dir = os.path.join(self.base_dir, "data")
         self.indices_dir = os.path.join(self.data_dir, "indices")
+        self.aipic_dir = os.path.join(self.data_dir, "aipic")
         self.creds_path = os.path.join(self.data_dir, "users.json")
+        self.leaderboard_path = os.path.join(self.data_dir, "leaderboard.json")
         os.makedirs(self.indices_dir, exist_ok=True)
         self.credentials = self._load_credentials()
+        self.leaderboard = self._load_leaderboard()
 
         #start server
         self.server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -44,6 +49,21 @@ class Server:
         # self.sonnet = pkl.load(self.sonnet_f)
         # self.sonnet_f.close()
         self.sonnet = indexer.PIndex("AllSonnets.txt")
+
+    def _new_ttt_game(self, players=None):
+        if players is None:
+            players = []
+        players = players[:2]
+        symbols = {}
+        for index, name in enumerate(players):
+            symbols[name] = "X" if index == 0 else "O"
+        return {
+            "players": players,
+            "symbols": symbols,
+            "board": [""] * 9,
+            "turn": "X",
+            "winner": ""
+        }
 
     def _load_credentials(self):
         try:
@@ -60,9 +80,226 @@ class Server:
         with open(self.creds_path, "w", encoding="utf-8") as f:
             json.dump(self.credentials, f, ensure_ascii=False, indent=2)
 
+    def _load_leaderboard(self):
+        try:
+            with open(self.leaderboard_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except Exception:
+            return {}
+
+    def _save_leaderboard(self):
+        os.makedirs(self.data_dir, exist_ok=True)
+        with open(self.leaderboard_path, "w", encoding="utf-8") as f:
+            json.dump(self.leaderboard, f, ensure_ascii=False, indent=2)
+
+    def _leaderboard_rows(self):
+        rows = []
+        for name, entry in self.leaderboard.items():
+            if isinstance(entry, dict):
+                score = entry.get("score", 0)
+                updated = entry.get("updated", "")
+            else:
+                score = entry
+                updated = ""
+            try:
+                score = int(score)
+            except Exception:
+                score = 0
+            rows.append((name, score, updated))
+        rows.sort(key=lambda row: (-row[1], row[0].lower()))
+        return rows
+
+    def _format_leaderboard(self, limit=10):
+        rows = self._leaderboard_rows()[:limit]
+        if len(rows) == 0:
+            return "Snake leaderboard is empty."
+
+        lines = ["Snake Leaderboard:"]
+        for rank, row in enumerate(rows, 1):
+            name, score, updated = row
+            line = str(rank) + ". " + name + " - " + str(score)
+            if updated:
+                line += " (" + updated + ")"
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _record_snake_score(self, name, score):
+        try:
+            score = int(score)
+        except Exception:
+            score = 0
+        score = max(0, score)
+
+        old_entry = self.leaderboard.get(name, {})
+        old_score = old_entry.get("score", -1) if isinstance(old_entry, dict) else old_entry
+        try:
+            old_score = int(old_score)
+        except Exception:
+            old_score = -1
+
+        is_new_best = score > old_score
+        if is_new_best:
+            self.leaderboard[name] = {
+                "score": score,
+                "updated": time.strftime('%d.%m.%y,%H:%M', time.localtime())
+            }
+            self._save_leaderboard()
+        return is_new_best
+
+    def _broadcast_leaderboard(self, exclude_sock=None):
+        msg = json.dumps({
+            "action":"leaderboard_update",
+            "results":self._format_leaderboard()
+        })
+        for sock in list(self.logged_sock2name.keys()):
+            if sock != exclude_sock:
+                mysend(sock, msg)
+
     def _idx_path(self, name):
         # keep original naming for simplicity; folder separation avoids clutter
         return os.path.join(self.indices_dir, name + ".idx")
+
+    def _handle_aipic(self, from_sock, prompt):
+        from_name = self.logged_sock2name[from_sock]
+        try:
+            image_path = generate_ai_image(prompt, self.aipic_dir)
+            result = "AI image saved: " + image_path
+            chat_notice = from_name + " generated an AI image: " + image_path
+
+            # Share the generated file path with current chat peers as a chat event.
+            for g in self.group.list_me(from_name)[1:]:
+                to_sock = self.logged_name2sock[g]
+                mysend(to_sock, json.dumps({
+                    "action":"exchange",
+                    "from":"[AI Pic]",
+                    "message":chat_notice
+                }))
+
+            mysend(from_sock, json.dumps({
+                "action":"aipic",
+                "status":"ok",
+                "results":result,
+                "path":image_path
+            }))
+        except Exception as e:
+            mysend(from_sock, json.dumps({
+                "action":"aipic",
+                "status":"error",
+                "results":str(e)
+            }))
+
+    def _ttt_public_state(self, message=""):
+        return {
+            "action": "ttt_state",
+            "players": self.ttt_game["players"],
+            "symbols": self.ttt_game["symbols"],
+            "board": self.ttt_game["board"],
+            "turn": self.ttt_game["turn"],
+            "winner": self.ttt_game["winner"],
+            "message": message
+        }
+
+    def _ttt_state_for(self, name, message=""):
+        state = self._ttt_public_state(message)
+        state["symbol"] = self.ttt_game["symbols"].get(name, "")
+        return state
+
+    def _ttt_prune_players(self):
+        live_players = [
+            name for name in self.ttt_game["players"]
+            if name in self.logged_name2sock
+        ]
+        if live_players != self.ttt_game["players"]:
+            self.ttt_game = self._new_ttt_game(live_players)
+
+    def _ttt_notify_players(self, exclude_name=None, message=""):
+        self._ttt_prune_players()
+        for name in self.ttt_game["players"]:
+            if name == exclude_name:
+                continue
+            sock = self.logged_name2sock.get(name)
+            if sock is not None:
+                mysend(sock, json.dumps(self._ttt_state_for(name, message)))
+
+    def _ttt_winner(self):
+        board = self.ttt_game["board"]
+        wins = [
+            (0, 1, 2), (3, 4, 5), (6, 7, 8),
+            (0, 3, 6), (1, 4, 7), (2, 5, 8),
+            (0, 4, 8), (2, 4, 6)
+        ]
+        for a, b, c in wins:
+            if board[a] and board[a] == board[b] and board[a] == board[c]:
+                return board[a]
+        if "" not in board:
+            return "draw"
+        return ""
+
+    def _ttt_reset_round(self):
+        self.ttt_game["board"] = [""] * 9
+        self.ttt_game["turn"] = "X"
+        self.ttt_game["winner"] = ""
+
+    def _ttt_join(self, name):
+        self._ttt_prune_players()
+        if name not in self.ttt_game["players"]:
+            if len(self.ttt_game["players"]) >= 2:
+                state = self._ttt_state_for(name, "Game is full.")
+                state["status"] = "full"
+                return state
+            self.ttt_game["players"].append(name)
+            self.ttt_game["symbols"][name] = "X" if len(self.ttt_game["players"]) == 1 else "O"
+            self._ttt_reset_round()
+            self._ttt_notify_players(exclude_name=name, message=name + " joined Tic-Tac-Toe Online.")
+        return self._ttt_state_for(name)
+
+    def _ttt_leave(self, name):
+        if name in self.ttt_game["players"]:
+            remaining = [player for player in self.ttt_game["players"] if player != name]
+            self.ttt_game = self._new_ttt_game(remaining)
+            self._ttt_notify_players(exclude_name=name, message=name + " left Tic-Tac-Toe Online.")
+        return self._ttt_state_for(name, "You left Tic-Tac-Toe Online.")
+
+    def _ttt_move(self, name, cell):
+        self._ttt_prune_players()
+        if name not in self.ttt_game["players"]:
+            state = self._ttt_state_for(name, "Join the game first.")
+            state["status"] = "error"
+            return state
+        if len(self.ttt_game["players"]) < 2:
+            state = self._ttt_state_for(name, "Waiting for a second player.")
+            state["status"] = "error"
+            return state
+        if self.ttt_game["winner"]:
+            state = self._ttt_state_for(name, "Round is over. Start a new round.")
+            state["status"] = "error"
+            return state
+
+        symbol = self.ttt_game["symbols"].get(name)
+        if symbol != self.ttt_game["turn"]:
+            state = self._ttt_state_for(name, "It is not your turn.")
+            state["status"] = "error"
+            return state
+        if cell < 0 or cell >= 9 or self.ttt_game["board"][cell] != "":
+            state = self._ttt_state_for(name, "That move is not legal.")
+            state["status"] = "error"
+            return state
+
+        self.ttt_game["board"][cell] = symbol
+        self.ttt_game["winner"] = self._ttt_winner()
+        if not self.ttt_game["winner"]:
+            self.ttt_game["turn"] = "O" if self.ttt_game["turn"] == "X" else "X"
+
+        message = name + " played " + symbol + "."
+        if self.ttt_game["winner"] == "draw":
+            message = "Tic-Tac-Toe ended in a draw."
+        elif self.ttt_game["winner"]:
+            message = name + " won Tic-Tac-Toe Online."
+        self._ttt_notify_players(exclude_name=name, message=message)
+        return self._ttt_state_for(name, message)
 
     def new_client(self, sock):
         #add to all sockets and to new clients
@@ -129,6 +366,7 @@ class Server:
         del self.logged_sock2name[sock]
         self.all_sockets.remove(sock)
         self.group.leave(name)
+        self._ttt_leave(name)
         sock.close()
 
 #==============================================================================
@@ -207,6 +445,61 @@ class Server:
                 search_rslt = '\n'.join([x[-1] for x in self.indices[from_name].search(term)])
                 print('server side search: ' + search_rslt)
                 mysend(from_sock, json.dumps({"action":"search", "results":search_rslt}))
+#==============================================================================
+#                 snake score and leaderboard
+#==============================================================================
+            elif msg["action"] == "snake_score":
+                from_name = self.logged_sock2name[from_sock]
+                score = msg.get("score", 0)
+                is_new_best = self._record_snake_score(from_name, score)
+                self._broadcast_leaderboard(exclude_sock=from_sock)
+                mysend(from_sock, json.dumps({
+                    "action":"snake_score",
+                    "status":"ok",
+                    "new_best":is_new_best,
+                    "results":self._format_leaderboard()
+                }))
+
+            elif msg["action"] == "leaderboard":
+                mysend(from_sock, json.dumps({
+                    "action":"leaderboard",
+                    "results":self._format_leaderboard()
+                }))
+#==============================================================================
+#                 ai picture generation
+#==============================================================================
+            elif msg["action"] == "aipic":
+                self._handle_aipic(from_sock, msg.get("prompt", ""))
+#==============================================================================
+#                 tic-tac-toe online
+#==============================================================================
+            elif msg["action"] == "ttt_join":
+                from_name = self.logged_sock2name[from_sock]
+                mysend(from_sock, json.dumps(self._ttt_join(from_name)))
+
+            elif msg["action"] == "ttt_move":
+                from_name = self.logged_sock2name[from_sock]
+                cell = msg.get("cell", -1)
+                try:
+                    cell = int(cell)
+                except Exception:
+                    cell = -1
+                mysend(from_sock, json.dumps(self._ttt_move(from_name, cell)))
+
+            elif msg["action"] == "ttt_reset":
+                from_name = self.logged_sock2name[from_sock]
+                if from_name in self.ttt_game["players"]:
+                    self._ttt_reset_round()
+                    self._ttt_notify_players(exclude_name=from_name, message=from_name + " started a new round.")
+                    mysend(from_sock, json.dumps(self._ttt_state_for(from_name, "New round started.")))
+                else:
+                    state = self._ttt_state_for(from_name, "Join the game first.")
+                    state["status"] = "error"
+                    mysend(from_sock, json.dumps(state))
+
+            elif msg["action"] == "ttt_leave":
+                from_name = self.logged_sock2name[from_sock]
+                mysend(from_sock, json.dumps(self._ttt_leave(from_name)))
 #==============================================================================
 # the "from" guy has had enough (talking to "to")!
 #==============================================================================
