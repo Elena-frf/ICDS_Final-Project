@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+__MACOSX/
+
+# Runtime-generated files
+gui/data/aipic/
+gui/data/leaderboard.json
+gui/*.idx
+output_*.webp
+output.webp
+cat.png
