@@ -483,6 +483,14 @@ class Server:
             elif msg["action"] == "time":
                 ctime = time.strftime('%d.%m.%y,%H:%M', time.localtime())
                 mysend(from_sock, json.dumps({"action":"time", "results":ctime}))
+
+            elif msg["action"] in ("list", "who"):
+                users = [name for name in self.group.members.keys()]
+                if users:
+                    result = "\n".join(users)
+                else:
+                    result = "No users online."
+                mysend(from_sock, json.dumps({"action":"list", "results":result}))
 #==============================================================================
 #                 search
 #==============================================================================

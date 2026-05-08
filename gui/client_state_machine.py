@@ -70,6 +70,16 @@ class ClientSM:
         response = json.loads(myrecv(self.s))
         self.out_msg += response.get("results", "") + "\n"
 
+    def parse_connect_target(self, my_msg):
+        peer = ""
+        if my_msg.startswith("c "):
+            peer = my_msg[2:].strip()
+        elif my_msg.startswith("connect "):
+            peer = my_msg[len("connect "):].strip()
+        elif my_msg.startswith("c_") and my_msg.endswith("_"):
+            peer = my_msg[2:-1].strip()
+        return peer
+
     def generate_ai_picture(self, prompt):
         prompt = prompt.strip()
         if not prompt:
@@ -198,17 +208,19 @@ class ClientSM:
                     elif my_msg == 'ttt':
                         self.out_msg += "Use the TicTacToe button to open Tic-Tac-Toe Online.\n"
 
-                    elif my_msg[0] == 'c':
-                        peer = my_msg[1:]
-                        peer = peer.strip()
-                        if self.connect_to(peer) == True:
-                            self.state = S_CHATTING
-                            self.out_msg += 'Connect to ' + peer + '. Chat away!\n\n'
-                            self.out_msg += '-----------------------------------\n'
+                    elif my_msg.startswith("c ") or my_msg.startswith("connect ") or my_msg.startswith("c_"):
+                        peer = self.parse_connect_target(my_msg)
+                        if peer:
+                            if self.connect_to(peer) == True:
+                                self.state = S_CHATTING
+                                self.out_msg += 'Connect to ' + peer + '. Chat away!\n\n'
+                                self.out_msg += '-----------------------------------\n'
+                            else:
+                                self.out_msg += 'Connection unsuccessful\n'
                         else:
-                            self.out_msg += 'Connection unsuccessful\n'
+                            self.out_msg += 'Please specify a peer name after c or connect.\n'
 
-                    elif my_msg[0] == '?':
+                    elif my_msg.startswith('?'):
                         term = my_msg[1:].strip()
                         mysend(self.s, json.dumps({"action":"search", "target":term}))
                         search_rslt = json.loads(myrecv(self.s))["results"].strip()
@@ -263,6 +275,19 @@ class ClientSM:
 
                 if my_msg == 'leaderboard':
                     self.show_leaderboard()
+                    return self.out_msg
+
+                if my_msg == 'time':
+                    mysend(self.s, json.dumps({"action":"time"}))
+                    time_in = json.loads(myrecv(self.s))["results"]
+                    self.out_msg += "Time is: " + time_in + "\n"
+                    return self.out_msg
+
+                if my_msg == 'who':
+                    mysend(self.s, json.dumps({"action":"list"}))
+                    logged_in = json.loads(myrecv(self.s))["results"]
+                    self.out_msg += 'Here are all the users in the system:\n'
+                    self.out_msg += logged_in + "\n"
                     return self.out_msg
                 
                 if my_msg == '/summary':

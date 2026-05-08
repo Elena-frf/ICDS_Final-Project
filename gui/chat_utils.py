@@ -13,7 +13,8 @@ SERVER = (CHAT_IP, CHAT_PORT)
 menu = "\n++++ Choose one of the following commands\n \
         time: calendar time in the system\n \
         who: to find out who else are there\n \
-        c _peer_: to connect to the _peer_ and chat\n \
+        c <peer>: to connect to the peer and chat\n \
+        connect <peer>: to connect to the peer and chat\n \
         ? _term_: to search your chat logs where _term_ appears\n \
         p _#_: to get number <#> sonnet\n \
         /aipic: _prompt_: to generate an AI image\n \
