@@ -144,75 +144,104 @@ class ClientSM:
         if self.state == S_LOGGEDIN:
             # todo: can't deal with multiple lines yet
             if len(my_msg) > 0:
-
-                if my_msg == 'q':
-                    self.out_msg += 'See you next time!\n'
-                    self.state = S_OFFLINE
-
-                elif my_msg == 'time':
-                    mysend(self.s, json.dumps({"action":"time"}))
-                    time_in = json.loads(myrecv(self.s))["results"]
-                    self.out_msg += "Time is: " + time_in
-
-                elif my_msg == 'who':
-                    mysend(self.s, json.dumps({"action":"list"}))
-                    logged_in = json.loads(myrecv(self.s))["results"]
-                    self.out_msg += 'Here are all the users in the system:\n'
-                    self.out_msg += logged_in
-
-                elif my_msg == 'leaderboard':
-                    self.show_leaderboard()
-
-                elif my_msg.startswith('__snake_score__ '):
-                    self.submit_snake_score(my_msg[len('__snake_score__ '):].strip())
-
-                elif my_msg.startswith('/aipic:'):
-                    self.generate_ai_picture(my_msg[len('/aipic:'):])
-
-                elif self.handle_tictactoe_command(my_msg):
-                    pass
-
-                elif my_msg == 'ttt':
-                    self.out_msg += "Use the TicTacToe button to open Tic-Tac-Toe Online.\n"
-
-                elif my_msg[0] == 'c':
-                    peer = my_msg[1:]
-                    peer = peer.strip()
-                    if self.connect_to(peer) == True:
-                        self.state = S_CHATTING
-                        self.out_msg += 'Connect to ' + peer + '. Chat away!\n\n'
-                        self.out_msg += '-----------------------------------\n'
-                    else:
-                        self.out_msg += 'Connection unsuccessful\n'
-
-                elif my_msg[0] == '?':
-                    term = my_msg[1:].strip()
-                    mysend(self.s, json.dumps({"action":"search", "target":term}))
-                    search_rslt = json.loads(myrecv(self.s))["results"].strip()
-                    if (len(search_rslt)) > 0:
-                        self.out_msg += search_rslt + '\n\n'
-                    else:
-                        self.out_msg += '\'' + term + '\'' + ' not found\n\n'
-
-                elif my_msg[0] == 'p' and my_msg[1:].isdigit():
-                    poem_idx = my_msg[1:].strip()
-                    mysend(self.s, json.dumps({"action":"poem", "target":poem_idx}))
-                    poem = json.loads(myrecv(self.s))["results"]
-                    # print(poem)
-                    if (len(poem) > 0):
-                        self.out_msg += poem + '\n\n'
-                    else:
-                        self.out_msg += 'Sonnet ' + poem_idx + ' not found\n\n'
-
+                if my_msg.startswith('@bot'):
+                    # 发送给服务器（和聊天状态一样）
+                    print("[DEBUG] Client sending @bot") 
+                    mysend(self.s, json.dumps({"action":"exchange", "from":"[" + self.me + "]", "message":my_msg}))
+                    self.out_msg += '[' + self.me + '] ' + my_msg + '\n'
+                    # 发送后不再执行后续命令判断，直接返回
+                    return self.out_msg
                 else:
-                    self.out_msg += menu
+                    if my_msg == 'q':
+                        self.out_msg += 'See you next time!\n'
+                        self.state = S_OFFLINE
+
+                    elif my_msg == 'time':
+                        mysend(self.s, json.dumps({"action":"time"}))
+                        time_in = json.loads(myrecv(self.s))["results"]
+                        self.out_msg += "Time is: " + time_in
+
+                    elif my_msg == 'who':
+                        mysend(self.s, json.dumps({"action":"list"}))
+                        logged_in = json.loads(myrecv(self.s))["results"]
+                        self.out_msg += 'Here are all the users in the system:\n'
+                        self.out_msg += logged_in
+
+                    elif my_msg == 'leaderboard':
+                        self.show_leaderboard()
+
+                    elif my_msg == '/summary':
+                        mysend(self.s, json.dumps({"action":"summary"}))
+                        response = json.loads(myrecv(self.s))
+                        self.out_msg += response.get("results", "Summary failed.") + "\n"
+
+                    elif my_msg == '/keywords':
+                        mysend(self.s, json.dumps({"action":"keywords"}))
+                        response = json.loads(myrecv(self.s))
+                        self.out_msg += response.get("results", "Keywords extraction failed.") + "\n"
+
+                    elif my_msg.startswith('/bot_personality '):
+                        personality = my_msg[len('/bot_personality '):].strip()
+                        mysend(self.s, json.dumps({"action":"bot_personality", "personality":personality}))
+                        response = json.loads(myrecv(self.s))
+                        self.out_msg += response.get("message", "") + "\n"
+
+                    elif my_msg.startswith('__snake_score__ '):
+                        self.submit_snake_score(my_msg[len('__snake_score__ '):].strip())
+
+                    elif my_msg.startswith('/aipic:'):
+                        self.generate_ai_picture(my_msg[len('/aipic:'):])
+
+                    elif self.handle_tictactoe_command(my_msg):
+                        pass
+
+                    elif my_msg == 'ttt':
+                        self.out_msg += "Use the TicTacToe button to open Tic-Tac-Toe Online.\n"
+
+                    elif my_msg[0] == 'c':
+                        peer = my_msg[1:]
+                        peer = peer.strip()
+                        if self.connect_to(peer) == True:
+                            self.state = S_CHATTING
+                            self.out_msg += 'Connect to ' + peer + '. Chat away!\n\n'
+                            self.out_msg += '-----------------------------------\n'
+                        else:
+                            self.out_msg += 'Connection unsuccessful\n'
+
+                    elif my_msg[0] == '?':
+                        term = my_msg[1:].strip()
+                        mysend(self.s, json.dumps({"action":"search", "target":term}))
+                        search_rslt = json.loads(myrecv(self.s))["results"].strip()
+                        if (len(search_rslt)) > 0:
+                            self.out_msg += search_rslt + '\n\n'
+                        else:
+                            self.out_msg += '\'' + term + '\'' + ' not found\n\n'
+
+                    elif my_msg[0] == 'p' and my_msg[1:].isdigit():
+                        poem_idx = my_msg[1:].strip()
+                        mysend(self.s, json.dumps({"action":"poem", "target":poem_idx}))
+                        poem = json.loads(myrecv(self.s))["results"]
+                        # print(poem)
+                        if (len(poem) > 0):
+                            self.out_msg += poem + '\n\n'
+                        else:
+                            self.out_msg += 'Sonnet ' + poem_idx + ' not found\n\n'
+
+                    else:
+                        self.out_msg += menu
 
             if len(peer_msg) > 0:
                 peer_msg = json.loads(peer_msg)
+                    
                 if self.handle_tictactoe_event(peer_msg):
                     pass
                 elif self.handle_server_notice(peer_msg):
                     pass
+                
+                elif peer_msg.get("action") == "exchange":
+                    msg_text = peer_msg.get("message", "")
+                    print(f"[DEBUG] Client received exchange: {msg_text[:50]}")
+                    self.out_msg += msg_text + "\n"
                 elif peer_msg["action"] == "connect":
                     self.peer = peer_msg["from"]
                     self.out_msg += 'Request from ' + self.peer + '\n'
@@ -221,15 +250,36 @@ class ClientSM:
                     self.out_msg += '------------------------------------\n'
                     self.state = S_CHATTING
 
-#==============================================================================
+    #==============================================================================
 # Start chatting, 'bye' for quit
 # This is event handling instate "S_CHATTING"
 #==============================================================================
         elif self.state == S_CHATTING:
             if len(my_msg) > 0:     # my stuff going out
+                if my_msg.startswith('@bot'):
+                    mysend(self.s, json.dumps({"action":"exchange", "from":"[" + self.me + "]", "message":my_msg}))
+                    self.out_msg += "[" + self.me + "] " + my_msg + "\n"
+                    return self.out_msg
+
                 if my_msg == 'leaderboard':
                     self.show_leaderboard()
                     return self.out_msg
+                
+                if my_msg == '/summary':
+                    mysend(self.s, json.dumps({"action":"summary"}))
+                    response = json.loads(myrecv(self.s))
+                    self.out_msg += response.get("results", "Summary failed.") + "\n"
+
+                if my_msg == '/keywords':
+                    mysend(self.s, json.dumps({"action":"keywords"}))
+                    response = json.loads(myrecv(self.s))
+                    self.out_msg += response.get("results", "Keywords extraction failed.") + "\n"
+
+                elif my_msg.startswith('/bot_personality '):
+                    personality = my_msg[len('/bot_personality '):].strip()
+                    mysend(self.s, json.dumps({"action":"bot_personality", "personality":personality}))
+                    response = json.loads(myrecv(self.s))
+                    self.out_msg += response.get("message", "") + "\n"
 
                 if my_msg.startswith('__snake_score__ '):
                     self.submit_snake_score(my_msg[len('__snake_score__ '):].strip())
@@ -248,7 +298,7 @@ class ClientSM:
 
                 mysend(self.s, json.dumps({"action":"exchange", "from":"[" + self.me + "]", "message":my_msg}))
                 # Echo my own message to UI immediately (server does not send it back to sender)
-                self.out_msg += "[" + self.me + "]" + my_msg
+                self.out_msg += "[" + self.me + "] " + my_msg + "\n"
                 if my_msg == 'bye':
                     self.disconnect()
                     self.state = S_LOGGEDIN
@@ -264,7 +314,7 @@ class ClientSM:
                 elif peer_msg["action"] == "disconnect":
                     self.state = S_LOGGEDIN
                 else:
-                    self.out_msg += peer_msg["from"] + peer_msg["message"]
+                    self.out_msg += peer_msg["message"] + "\n"
 
 
             # Display the menu again

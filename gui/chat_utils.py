@@ -1,4 +1,5 @@
 import socket
+from textblob import TextBlob
 import time
 
 # use local loop back address by default
@@ -16,6 +17,10 @@ menu = "\n++++ Choose one of the following commands\n \
         ? _term_: to search your chat logs where _term_ appears\n \
         p _#_: to get number <#> sonnet\n \
         /aipic: _prompt_: to generate an AI image\n \
+        @bot _message_: to chat with the bot assistant\n \
+        /bot_personality _text_: to set bot personality\n \
+        /summary: to get a summary of recent chat\n \
+        /keywords: to extract keywords from recent chat\n \
         leaderboard: to show the Snake leaderboard\n \
         ttt: to open Tic-Tac-Toe Online\n \
         q: to leave the chat system\n\n"
@@ -77,4 +82,13 @@ def myrecv(s):
 
 def text_proc(text, user):
     ctime = time.strftime('%d.%m.%y,%H:%M', time.localtime())
-    return('(' + ctime + ') ' + user + ' : ' + text) # message goes directly to screen
+    # 情感分析
+    blob = TextBlob(text)
+    sentiment = blob.sentiment.polarity   # 范围 -1 到 1
+    if sentiment > 0.2:
+        emotion = " 😊"
+    elif sentiment < -0.2:
+        emotion = " 😡"
+    else:
+        emotion = " 😐"
+    return '(' + ctime + ') ' + user + ' : ' + text + emotion

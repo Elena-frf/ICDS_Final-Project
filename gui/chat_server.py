@@ -3,6 +3,7 @@ Created on Tue Jul 22 00:47:05 2014
 
 @author: alina, zzhang
 """
+MAX_HISTORY = 100   
 
 import time
 import socket
@@ -16,6 +17,7 @@ import pickle as pkl
 from chat_utils import *
 import chat_group as grp
 from ai_pic import generate_ai_image
+from chat_bot_client import ChatBotClient
 
 class Server:
     def __init__(self):
@@ -25,6 +27,8 @@ class Server:
         self.all_sockets = []
         self.group = grp.Group()
         self.ttt_game = self._new_ttt_game()
+        self.chatbot = ChatBotClient()
+        self.recent_history = {}   # { username: [(timestamp, message), ...] }
 
         # storage locations (keep generated files out of the project root)
         self.base_dir = os.path.dirname(__file__)
@@ -36,6 +40,7 @@ class Server:
         os.makedirs(self.indices_dir, exist_ok=True)
         self.credentials = self._load_credentials()
         self.leaderboard = self._load_leaderboard()
+        self.user_bots = {}
 
         #start server
         self.server=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -333,6 +338,8 @@ class Server:
                         self.new_clients.remove(sock)
                         #add into the name to sock mapping
                         self.logged_name2sock[name] = sock
+                        self.user_bots[name] = ChatBotClient(name=name)
+                        print(f"[DEBUG] Created bot for {name}")
                         self.logged_sock2name[sock] = name
                         #load chat history of that user
                         if name not in self.indices.keys():
@@ -367,6 +374,8 @@ class Server:
         self.all_sockets.remove(sock)
         self.group.leave(name)
         self._ttt_leave(name)
+        if name in self.user_bots:
+            del self.user_bots[name]
         sock.close()
 
 #==============================================================================
@@ -403,20 +412,44 @@ class Server:
             elif msg["action"] == "exchange":
                 from_name = self.logged_sock2name[from_sock]
                 the_guys = self.group.list_me(from_name)
-                #said = msg["from"]+msg["message"]
                 said2 = text_proc(msg["message"], from_name)
                 self.indices[from_name].add_msg_and_index(said2)
                 for g in the_guys[1:]:
                     to_sock = self.logged_name2sock[g]
                     self.indices[g].add_msg_and_index(said2)
-                    mysend(to_sock, json.dumps({"action":"exchange", "from":msg["from"], "message":msg["message"]}))
-#==============================================================================
-#                 listing available peers
-#==============================================================================
-            elif msg["action"] == "list":
-                from_name = self.logged_sock2name[from_sock]
-                msg = self.group.list_all()
-                mysend(from_sock, json.dumps({"action":"list", "results":msg}))
+                    mysend(to_sock, json.dumps({"action":"exchange", "message": said2}))
+
+                # 处理 @bot 命令（广播给群组所有成员）
+                if "@bot" in msg["message"].lower():
+                    print(f"[DEBUG] @bot detected from {from_name}")
+                    user_message = msg["message"].lower().replace("@bot", "").strip()
+                    print(f"[DEBUG] user_message: '{user_message}'")
+                    if user_message:
+                        bot = self.user_bots.get(from_name)
+                        print(f"[DEBUG] bot instance: {bot}")
+                        if bot:
+                            try:
+                                print("[DEBUG] Calling bot.chat()...")
+                                reply = bot.chat(user_message)
+                                print(f"[DEBUG] Got reply: {reply[:50]}...")
+                                # 获取当前用户所在的群组成员（包括自己）
+                                group_members = self.group.list_me(from_name)  # 返回 [from_name, peer1, peer2, ...]
+                                # 遍历群组成员，每个人都发送机器人的回复
+                                for member in group_members:
+                                    member_sock = self.logged_name2sock.get(member)
+                                    if member_sock:
+                                        mysend(member_sock, json.dumps({"action":"exchange", "message": f"(Bot) {reply}"}))
+                            except Exception as e:
+                                print(f"[ERROR] bot.chat() failed: {e}")
+                                import traceback
+                                traceback.print_exc()
+                                # 出错时只发给发送者本人错误信息
+                                mysend(from_sock, json.dumps({"action":"exchange", "message": f"(Bot) Error: {e}"}))
+                        else:
+                            print("[WARN] No bot instance for user")
+                            mysend(from_sock, json.dumps({"action":"exchange", "message": "(Bot) Sorry, I'm not ready yet."}))
+                    else:
+                        print("[DEBUG] Empty user_message after @bot")
 #==============================================================================
 #             retrieve a sonnet
 #==============================================================================
@@ -465,11 +498,56 @@ class Server:
                     "action":"leaderboard",
                     "results":self._format_leaderboard()
                 }))
+
+            elif msg["action"] == "summary":
+                from_name = self.logged_sock2name[from_sock]
+                hist = self.recent_history.get(from_name, [])
+                if not hist:
+                    result = "No recent messages to summarize."
+                else:
+                    # 取最近20条消息的内容
+                    recent_texts = [text for (ts, text) in hist[-20:]]
+                    conversation = "\n".join(recent_texts)
+                    prompt = f"Please summarize the following conversation in one short sentence:\n{conversation}"
+                    try:
+                        import llm_helper
+                        summary = llm_helper.ask_llm(prompt)
+                        result = f"Summary: {summary}"
+                    except Exception as e:
+                        result = f"Failed to summarize: {e}"
+                mysend(from_sock, json.dumps({"action":"summary", "results":result}))
+
+            elif msg["action"] == "keywords":
+                from_name = self.logged_sock2name[from_sock]
+                hist = self.recent_history.get(from_name, [])
+                if not hist:
+                    result = "No recent messages to extract keywords from."
+                else:
+                    recent_texts = [text for (ts, text) in hist[-20:]]
+                    conversation = " ".join(recent_texts)
+                    prompt = f"Extract up to 5 important keywords from the following conversation, separated by commas:\n{conversation}"
+                    try:
+                        import llm_helper
+                        keywords = llm_helper.ask_llm(prompt)
+                        result = f"Keywords: {keywords}"
+                    except Exception as e:
+                        result = f"Failed to extract keywords: {e}"
+                mysend(from_sock, json.dumps({"action":"keywords", "results":result}))
 #==============================================================================
 #                 ai picture generation
 #==============================================================================
             elif msg["action"] == "aipic":
                 self._handle_aipic(from_sock, msg.get("prompt", ""))
+
+            elif msg["action"] == "bot_personality":
+                from_name = self.logged_sock2name[from_sock]
+                personality = msg.get("personality", "").strip()
+                bot = self.user_bots.get(from_name)
+                if bot and personality:
+                    bot.set_personality(personality)
+                    mysend(from_sock, json.dumps({"action":"bot_personality", "status":"ok", "message":f"Personality set to: {personality}"}))
+                else:
+                    mysend(from_sock, json.dumps({"action":"bot_personality", "status":"error", "message":"Failed to set personality"}))
 #==============================================================================
 #                 tic-tac-toe online
 #==============================================================================
