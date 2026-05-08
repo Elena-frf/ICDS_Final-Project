@@ -269,17 +269,20 @@ class ClientSM:
                     mysend(self.s, json.dumps({"action":"summary"}))
                     response = json.loads(myrecv(self.s))
                     self.out_msg += response.get("results", "Summary failed.") + "\n"
+                    return self.out_msg
 
                 if my_msg == '/keywords':
                     mysend(self.s, json.dumps({"action":"keywords"}))
                     response = json.loads(myrecv(self.s))
                     self.out_msg += response.get("results", "Keywords extraction failed.") + "\n"
+                    return self.out_msg
 
                 elif my_msg.startswith('/bot_personality '):
                     personality = my_msg[len('/bot_personality '):].strip()
                     mysend(self.s, json.dumps({"action":"bot_personality", "personality":personality}))
                     response = json.loads(myrecv(self.s))
                     self.out_msg += response.get("message", "") + "\n"
+                    return self.out_msg
 
                 if my_msg.startswith('__snake_score__ '):
                     self.submit_snake_score(my_msg[len('__snake_score__ '):].strip())

@@ -55,6 +55,14 @@ class Server:
         # self.sonnet_f.close()
         self.sonnet = indexer.PIndex("AllSonnets.txt")
 
+    def _record_history(self, username, message):
+        if not username or message is None:
+            return
+        hist = self.recent_history.setdefault(username, [])
+        hist.append((time.time(), message))
+        if len(hist) > MAX_HISTORY:
+            self.recent_history[username] = hist[-MAX_HISTORY:]
+
     def _new_ttt_game(self, players=None):
         if players is None:
             players = []
@@ -414,9 +422,11 @@ class Server:
                 the_guys = self.group.list_me(from_name)
                 said2 = text_proc(msg["message"], from_name)
                 self.indices[from_name].add_msg_and_index(said2)
+                self._record_history(from_name, said2)
                 for g in the_guys[1:]:
                     to_sock = self.logged_name2sock[g]
                     self.indices[g].add_msg_and_index(said2)
+                    self._record_history(g, said2)
                     mysend(to_sock, json.dumps({"action":"exchange", "message": said2}))
 
                 # 处理 @bot 命令（广播给群组所有成员）
@@ -429,6 +439,10 @@ class Server:
                         print(f"[DEBUG] bot instance: {bot}")
                         if bot:
                             try:
+                                prior = self.recent_history.get(from_name, [])
+                                if prior:
+                                    prior_text = "\n".join([text for (_, text) in prior[-20:]])
+                                    user_message = f"Previous conversation:\n{prior_text}\n\nCurrent request:\n{user_message}"
                                 print("[DEBUG] Calling bot.chat()...")
                                 reply = bot.chat(user_message)
                                 print(f"[DEBUG] Got reply: {reply[:50]}...")
@@ -438,7 +452,9 @@ class Server:
                                 for member in group_members:
                                     member_sock = self.logged_name2sock.get(member)
                                     if member_sock:
-                                        mysend(member_sock, json.dumps({"action":"exchange", "message": f"(Bot) {reply}"}))
+                                        bot_text = f"(Bot) {reply}"
+                                        self._record_history(member, bot_text)
+                                        mysend(member_sock, json.dumps({"action":"exchange", "message": bot_text}))
                             except Exception as e:
                                 print(f"[ERROR] bot.chat() failed: {e}")
                                 import traceback
